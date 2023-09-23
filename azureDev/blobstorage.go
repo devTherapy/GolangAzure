@@ -1,14 +1,12 @@
 package azureDev
 
 import (
-	"context"
 	"fmt"
-	"io"
+	"golang-azure/azureDev/config"
 	"log"
 	"os"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/Azure/azure-sdk-for-go/storage"
 )
 
 type FileType int32 //enum
@@ -19,12 +17,11 @@ const (
 )
 
 type FileProperties struct {
-	Filetype FileType
+	Filetype string
 	Filepath string
 	Filename string
+	Url      string
 }
-
-const url = "https://sayostorage.blob.core.windows.net/"
 
 func handleError(err error) {
 	if err != nil {
@@ -33,72 +30,90 @@ func handleError(err error) {
 	}
 }
 
-func UploadFile(fileProperties FileProperties) {
-	containerName := "sayocontainer"
-	ctx := context.Background()
-	credential, err := azidentity.NewDefaultAzureCredential(nil)
-	handleError(err)
-	client, err := azblob.NewClient(url, credential, nil)
+// func UploadFile(fileProperties FileProperties) {
+// 	containerName := "sayocontainer"
+// 	ctx := context.Background()
+// 	credential, err := azidentity.NewDefaultAzureCredential(nil)
+// 	handleError(err)
+// 	client, err := azblob.NewClient(url, credential, nil)
+// 	handleError(err)
+
+// 	file, err := os.Open(fileProperties.Filepath)
+// 	handleError(err)
+// 	defer file.Close()
+
+// 	_, err = client.UploadStream(ctx, containerName, fileProperties.Filename, file, &azblob.UploadStreamOptions{})
+// 	handleError(err)
+// }
+
+// func DownloadFile(fileProperties FileProperties) {
+// 	containerName := "sayocontainer"
+// 	ctx := context.Background()
+// 	credential, err := azidentity.NewDefaultAzureCredential(nil)
+// 	handleError(err)
+// 	client, err := azblob.NewClient(url, credential, nil)
+// 	handleError(err)
+
+// 	file, err := os.Create(fileProperties.Filename)
+// 	handleError(err)
+// 	defer file.Close()
+
+// 	downloadResponse, err := client.DownloadStream(ctx, containerName, fileProperties.Filename, &azblob.DownloadStreamOptions{})
+// 	handleError(err)
+// 	downloadResponse.Body.Close()
+// 	_, err = io.Copy(file, downloadResponse.Body)
+// 	handleError(err)
+// }
+
+func DeleteFile(fileProperties FileProperties) bool {
+
+	config := config.GetConfig()
+	client, err := storage.NewBasicClient(config.StorageName, config.AccountKey)
 	handleError(err)
 
+	//get reference to the container
+
+	blobClient := client.GetBlobService()
+
+	container := blobClient.GetContainerReference(config.ContainerName)
+
+	if container == nil {
+		log.Fatal("No container found")
+	}
+
+	blob := container.GetBlobReference(fileProperties.Filename)
+
+	deleted, err := blob.DeleteIfExists(nil)
+
+	handleError(err)
+
+	return deleted
+}
+
+func UploadFile(fileProperties FileProperties) string {
+	var config = config.GetConfig()
+
+	client, err := storage.NewBasicClient(config.StorageName, config.AccountKey)
+	handleError(err)
+
+	//get reference to the container
+
+	blobClient := client.GetBlobService()
+
+	container := blobClient.GetContainerReference(config.ContainerName)
+
+	if _, err := container.CreateIfNotExists(nil); err != nil {
+		log.Fatal(err)
+	}
+
+	blob := container.GetBlobReference(fileProperties.Filename)
+	blob.Properties.ContentType = fileProperties.Filetype
 	file, err := os.Open(fileProperties.Filepath)
 	handleError(err)
 	defer file.Close()
 
-	_, err = client.UploadStream(ctx, containerName, fileProperties.Filename, file, &azblob.UploadStreamOptions{})
+	err = blob.CreateBlockBlobFromReader(file, nil)
 	handleError(err)
+	url := blob.GetURL()
+	return url
 }
-
-func DownloadFile(fileProperties FileProperties) {
-	containerName := "sayocontainer"
-	ctx := context.Background()
-	credential, err := azidentity.NewDefaultAzureCredential(nil)
-	handleError(err)
-	client, err := azblob.NewClient(url, credential, nil)
-	handleError(err)
-
-	file, err := os.Create(fileProperties.Filename)
-	handleError(err)
-	defer file.Close()
-
-	downloadResponse, err := client.DownloadStream(ctx, containerName, fileProperties.Filename, &azblob.DownloadStreamOptions{})
-	handleError(err)
-	downloadResponse.Body.Close()
-	_, err = io.Copy(file, downloadResponse.Body)
-	handleError(err)
-}
-
-func DeleteFile(fileProperties FileProperties) {
-	containerName := "sayocontainer"
-	ctx := context.Background()
-	credential, err := azidentity.NewDefaultAzureCredential(nil)
-	handleError(err)
-	client, err := azblob.NewClient(url, credential, nil)
-	handleError(err)
-
-	_, err = client.DeleteBlob(ctx, containerName, fileProperties.Filename, nil)
-	handleError(err)
-}
-
-func ListFiles() {
-	containerName := "sayocontainer"
-	ctx := context.Background()
-	credential, err := azidentity.NewDefaultAzureCredential(nil)
-	handleError(err)
-	client, err := azblob.NewClient(url, credential, nil)
-	handleError(err)
-
-	p := client.NewListBlobsFlatPager(containerName, &azblob.ListBlobsFlatOptions{
-		Include: azblob.ListBlobsInclude{Versions: true, Snapshots: true},
-	})
-
-	for p.More() {
-		resp, err := p.NextPage(ctx)
-		handleError(err)
-		for _, blob := range resp.Segment.BlobItems {
-			log.Printf("Blob name: %s\n", *blob.Name)
-		}
-	}
-}
-
-//write a function to read a file from disc and upload it to azure blob storage
